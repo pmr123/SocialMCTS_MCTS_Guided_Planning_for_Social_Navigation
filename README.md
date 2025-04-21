@@ -1,4 +1,4 @@
-# Crowd Navigation Simulation
+# SocialMCTS: MCTS-Guided Planning for Social Navigation
 
 A comprehensive crowd navigation simulation framework that implements and compares various navigation algorithms in a MiniWorld environment. The framework includes traditional planning approaches (DWA, RRT*, SCL) and a novel MCTS-based approach with Vision Language Model integration.
 
