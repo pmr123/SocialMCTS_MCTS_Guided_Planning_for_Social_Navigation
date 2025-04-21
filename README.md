@@ -2,6 +2,18 @@
 
 A comprehensive crowd navigation simulation framework that implements and compares various navigation algorithms in a MiniWorld environment. The framework includes traditional planning approaches (DWA, RRT*, SCL) and a novel MCTS-based approach with Vision Language Model integration.
 
+## Abstract
+
+This project presents a novel approach to socially-aware crowd navigation by combining Monte Carlo Tree Search (MCTS) with Vision Language Models (VLM) to create more human-like navigation behaviors. The framework implements and compares multiple navigation algorithms including Dynamic Window Approach (DWA), Rapidly-exploring Random Tree Star (RRT*), and Socially Compliant Learning (SCL) against our proposed MCTS-VLM hybrid approach. The system operates in a MiniWorld environment where the robot must navigate through dynamic crowds while maintaining appropriate social distances and exhibiting natural movement patterns. The VLM component provides human-like decision-making capabilities by analyzing the scene and suggesting socially appropriate actions, while MCTS ensures optimal long-term planning. Our results demonstrate that the MCTS-VLM approach significantly outperforms traditional methods in social navigation metrics, achieving zero intimate space intrusions and maintaining larger minimum distances to people, though with some trade-offs in computational efficiency. The framework includes comprehensive metrics tracking, visualization tools, and a modular architecture that allows for easy integration of new navigation algorithms and social awareness components.
+
+## Keywords
+
+- Social Navigation
+- Monte Carlo Tree Search
+- Vision Language Models
+- Crowd Simulation
+- Human-Robot Interaction
+
 ## Project Structure
 
 The project is organized into several logical components:
