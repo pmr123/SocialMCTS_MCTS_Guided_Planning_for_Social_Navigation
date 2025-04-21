@@ -1,0 +1,37 @@
+{
+  "red_cubes": 1,
+  "blue_cuboids": 2,
+  "humans_detected": 2,
+  "objects": [
+    {
+      "color": "red",
+      "shape": "cube",
+      "bbox": [
+        0,
+        39,
+        17,
+        17
+      ]
+    },
+    {
+      "color": "blue",
+      "shape": "cuboid",
+      "bbox": [
+        28,
+        28,
+        9,
+        19
+      ]
+    },
+    {
+      "color": "blue",
+      "shape": "cuboid",
+      "bbox": [
+        52,
+        27,
+        11,
+        23
+      ]
+    }
+  ]
+}
