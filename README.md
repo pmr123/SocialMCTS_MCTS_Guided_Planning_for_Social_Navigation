@@ -43,6 +43,21 @@ The project is organized into several logical components:
 - `train_mcts.py`: Script for training the MCTS agent
 - `run_mcts.py`: Script for running the trained MCTS agent
 
+## System Flowchart
+
+Our system architecture integrates MCTS planning with Vision Language Models for socially-aware navigation:
+
+![System Flowchart](Metrics/flowchart.png)
+
+The system operates through several key components:
+1. The Simulation Environment provides RGB observations and robot/goal state information
+2. The Object Detection Module processes raw images to identify humans and goals
+3. The MCTS Tree maintains possible action sequences and their evaluations
+4. The Vision Language Model (Frozen Llama 3.2 11B) provides social awareness by scoring actions
+5. State Space Updates combine environment information with detection results
+
+This integrated approach allows for both strategic planning through MCTS and socially-aware decision making through VLM analysis.
+
 ## MCTS with Vision Language Model
 
 Our MCTS implementation combines traditional Monte Carlo Tree Search with a Vision Language Model (VLM) to make human-like navigation decisions. Here's how it works:
@@ -221,13 +236,5 @@ While MCTS demonstrates superior social navigation capabilities that could signi
    - May require hardware upgrades for real-time performance
 
 These results suggest that MCTS with VLM integration is a promising approach for human-centric environments where social navigation quality is paramount, despite its current computational overhead. Future optimizations could help bridge the performance gap while maintaining its superior social navigation capabilities.
-
-## Contributing
-
-1. Fork the repository
-2. Create your feature branch
-3. Commit your changes
-4. Push to the branch
-5. Create a new Pull Request
 
 

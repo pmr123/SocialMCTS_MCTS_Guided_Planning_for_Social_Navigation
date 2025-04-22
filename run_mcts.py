@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import os
 import argparse
+from matplotlib.dviread import Box
 import numpy as np
 import gymnasium as gym
 import logging
@@ -16,7 +17,6 @@ from metric_tracker import MetricTracker
 # Import MiniWorld
 try:
     import miniworld
-    from miniworld.envs import MiniWorldEnv
 except ImportError:
     raise ImportError("MiniWorld environment not found, please install it with: pip install gym-miniworld")
 
@@ -35,7 +35,7 @@ def parse_arguments():
     parser = argparse.ArgumentParser(description="Run MCTS agent for navigation")
     
     # Environment parameters
-    parser.add_argument("--env_id", type=str, default="MiniWorld-Hallway-v0", 
+    parser.add_argument("--env_id", type=str, default="MiniWorld-OneRoomS6-v0", 
                         help="MiniWorld environment ID")
     
     # Running parameters
@@ -80,6 +80,26 @@ def parse_arguments():
     
     return parser.parse_args()
 
+def _get_goal_position(env) -> np.ndarray:
+        """Get the position of the goal (red box) from the environment"""
+        # Get all entities
+        entities = env.miniworld_env.entities
+        
+        # Find the red box (goal)
+        goal_entity = None
+        for entity in entities:
+            if isinstance(entity, Box) and hasattr(entity, 'color_vec'):
+                # Check if it's red (RGB values close to [1, 0, 0])
+                if np.allclose(entity.color_vec, [1.0, 0.0, 0.0], atol=0.1):
+                    goal_entity = entity
+                    break
+                    
+        if goal_entity is None:
+            raise ValueError("Could not find goal (red box) in environment")
+            
+        # Return x,z coordinates (ignoring y/height)
+        return np.array([goal_entity.pos[0], goal_entity.pos[2]])
+    
 def main():
     """Main function to run the trained agent"""
     args = parse_arguments()
@@ -175,7 +195,10 @@ def main():
                     # Use VLM to get the first action prediction (for logging)
                     robot_pos = env.agent.pos
                     robot_orientation = env.agent.dir * 90
-                    goal_pos = env.goal_pos
+                    try:
+                        goal_pos = env.goal_pos
+                    except:
+                        goal_pos = _get_goal_position(env)
                     
                     vlm_results = agent.get_vlm_actions(
                         tagged_image=tagged_image,

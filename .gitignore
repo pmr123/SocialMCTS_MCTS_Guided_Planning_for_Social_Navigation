@@ -26,6 +26,14 @@ unsloth_compiled_cache/
 # Logs
 logs/*
 !logs/.gitkeep
+evaluation_logs/*
+!evaluation_logs/.gitkeep
+debug_input.png
+debug_tagged.png
+
+# metrics
+metrics_results.csv
+
 
 # Jupyter Notebook
 .ipynb_checkpoints

@@ -7,6 +7,12 @@ import os
 import logging
 from typing import Dict, List, Tuple, Optional, Any
 from collections import defaultdict
+import gymnasium as gym
+import numpy as np
+import miniworld  # Import MiniWorld to register environments
+from miniworld.entity import Box
+import copy as cp
+import cv2
 
 from human_goal_detector import detect_humans_and_goal, create_tagged_image
 from vlm_interface import VLMInterface
@@ -51,9 +57,13 @@ class MCTSNode:
     def select_child(self, exploration_weight=1.0):
         """Select child node using UCB formula"""
         # UCB formula: value + exploration_weight * sqrt(log(parent visits) / child visits)
-        log_visits_parent = math.log(self.visit_count)
+        log_visits_parent = math.log(max(self.visit_count, 1))  # Avoid log(0)
         
         def ucb_score(child):
+            # If child has never been visited, return infinity to ensure exploration
+            if child.visit_count == 0:
+                return float('inf')
+            
             # Exploit term
             exploit = child.value
             # Explore term
@@ -142,7 +152,7 @@ class MCTSAgent:
         Create a state representation for the MCTS tree
         
         Args:
-            observation: RGB image observation
+            observation: RGB image observation or tuple containing observation
             robot_pos: Robot position (x, y, z)
             robot_orientation: Robot orientation in degrees
             goal_pos: Goal position (x, y, z)
@@ -150,13 +160,28 @@ class MCTSAgent:
         Returns:
             State representation for MCTS
         """
+        # Handle tuple observation
+        if isinstance(observation, tuple):
+            observation = observation[0]  # Take the first element which should be the image
+        
+        # Convert observation to numpy array if it's not already
+        if not isinstance(observation, np.ndarray):
+            observation = np.array(observation)
+        
+        # Reshape if necessary
+        if len(observation.shape) == 1:
+            size = int(np.sqrt(len(observation) / 3))
+            observation = observation.reshape(size, size, 3)
+        
+        print(f"Observation shape in get_state_representation: {observation.shape}")
+        
         # Extract only x and z coordinates for 2D positions, ignoring y
         robot_pos_2d = np.array([robot_pos[0], robot_pos[2]]) if len(robot_pos) > 2 else robot_pos
         goal_pos_2d = np.array([goal_pos[0], goal_pos[2]]) if len(goal_pos) > 2 else goal_pos
         
         # Use the image itself, robot position, orientation, and goal position as the state
         return {
-            "image": observation.copy(),
+            "image": observation,  # Now guaranteed to be a numpy array with shape (H, W, 3)
             "robot_pos": robot_pos_2d,
             "robot_orientation": robot_orientation,
             "goal_pos": goal_pos_2d
@@ -167,14 +192,60 @@ class MCTSAgent:
         Detect humans and goal in the image
         
         Args:
-            image: RGB image
+            image: RGB image (can be tuple, list, or numpy array)
             
         Returns:
             Detection results and tagged image
         """
-        detection_results = detect_humans_and_goal(image)
-        tagged_image = create_tagged_image(image, detection_results)
-        return detection_results, tagged_image
+        try:
+            # Debug print
+            print(f"Input image type: {type(image)}")
+            
+            # If image is a tuple, extract the first element (usually the observation)
+            if isinstance(image, tuple):
+                print(f"Tuple length: {len(image)}")
+                print(f"Tuple contents types: {[type(x) for x in image]}")
+                image = image[0]
+            
+            # Convert to numpy array if needed
+            if not isinstance(image, np.ndarray):
+                image = np.array(image)
+            
+            print(f"Image shape before processing: {image.shape}, dtype: {image.dtype}")
+            
+            # Ensure correct shape and type
+            if len(image.shape) != 3 or image.shape[2] != 3:
+                raise ValueError(f"Expected RGB image with shape (H, W, 3), got shape {image.shape}")
+            
+            # Ensure uint8 format
+            if image.dtype != np.uint8:
+                image = (image * 255).astype(np.uint8)
+            
+            # Add debug visualization
+            debug_image = image.copy()
+            cv2.imwrite('debug_input.png', cv2.cvtColor(debug_image, cv2.COLOR_RGB2BGR))
+            
+            # Detect objects
+            detection_results = detect_humans_and_goal(image)
+            print(f"Detection results: {detection_results}")
+            
+            tagged_image = create_tagged_image(image, detection_results)
+            cv2.imwrite('debug_tagged.png', cv2.cvtColor(tagged_image, cv2.COLOR_RGB2BGR))
+            
+            print(f"Tagged image shape: {tagged_image.shape}, dtype: {tagged_image.dtype}")
+            return detection_results, tagged_image
+            
+        except Exception as e:
+            logger.error(f"Error in detect_objects: {str(e)}")
+            logger.error(f"Image shape: {image.shape if isinstance(image, np.ndarray) else 'not numpy array'}")
+            # Return empty detection results and original image as fallback
+            empty_results = {
+                "red_cubes": 0,
+                "blue_cuboids": 0,
+                "humans_detected": 0,
+                "objects": []
+            }
+            return empty_results, image
     
     def get_vlm_actions(self, tagged_image, robot_pos, robot_orientation, goal_pos, detection_results):
         """
@@ -199,22 +270,48 @@ class MCTSAgent:
             detection_results["answer"] = actions
             return detection_results
         
-        # Convert to 3D positions for VLM if needed (assuming y=0)
-        robot_pos_3d = np.array([robot_pos[0], 0, robot_pos[1]]) if len(robot_pos) == 2 else robot_pos
-        goal_pos_3d = np.array([goal_pos[0], 0, goal_pos[1]]) if len(goal_pos) == 2 else goal_pos
+        try:
+            # Debug print
+            print(f"Tagged image shape: {tagged_image.shape}, dtype: {tagged_image.dtype}")
+            
+            # Ensure image is in the correct format
+            if tagged_image.dtype != np.uint8:
+                tagged_image = (tagged_image * 255).astype(np.uint8)
+            
+            # Resize image if needed (check VLM's expected input size)
+            expected_size = (224, 224)  # Standard size for many vision models
+            if tagged_image.shape[:2] != expected_size:
+                tagged_image = cv2.resize(tagged_image, expected_size)
+            
+            # Convert to 3D positions for VLM if needed (assuming y=0)
+            robot_pos_3d = np.array([robot_pos[0], 0, robot_pos[1]]) if len(robot_pos) == 2 else robot_pos
+            goal_pos_3d = np.array([goal_pos[0], 0, goal_pos[1]]) if len(goal_pos) == 2 else goal_pos
+            
+            # Generate actions using VLM
+            results = self.vlm.generate_actions(
+                image=tagged_image,
+                robot_pos=robot_pos_3d,
+                robot_orientation=robot_orientation,
+                goal_pos=goal_pos_3d,
+                detection_results=detection_results,
+                k=2,
+                log_output=self.save_vlm_logs
+            )
+            
+            return results
         
-        # Generate actions using VLM
-        results = self.vlm.generate_actions(
-            image=tagged_image,
-            robot_pos=robot_pos_3d,
-            robot_orientation=robot_orientation,
-            goal_pos=goal_pos_3d,
-            detection_results=detection_results,
-            k=2,
-            log_output=self.save_vlm_logs
-        )
-        
-        return results
+        except Exception as e:
+            logger.error(f"Error in VLM processing: {str(e)}")
+            logger.error(f"Tagged image info - shape: {tagged_image.shape}, dtype: {tagged_image.dtype}")
+            logger.error(f"Detection results: {detection_results}")
+            
+            # Fallback to random actions
+            actions = {}
+            for i in range(2):
+                action = random.choice(self.action_space)
+                actions[str(action)] = random.uniform(0.5, 1.0)
+            detection_results["answer"] = actions
+            return detection_results
     
     def save_model(self, path=None):
         """Save the model to a file"""
@@ -270,6 +367,26 @@ class MCTSAgent:
         else:
             self.stats["avg_reward"] = (prev_avg * prev_count + reward) / self.stats["iterations"]
     
+    def _get_goal_position(self, env) -> np.ndarray:
+        """Get the position of the goal (red box) from the environment"""
+        # Get all entities
+        entities = env.unwrapped_env.entities
+        
+        # Find the red box (goal)
+        goal_entity = None
+        for entity in entities:
+            if isinstance(entity, Box) and hasattr(entity, 'color_vec'):
+                # Check if it's red (RGB values close to [1, 0, 0])
+                if np.allclose(entity.color_vec, [1.0, 0.0, 0.0], atol=0.1):
+                    goal_entity = entity
+                    break
+                    
+        if goal_entity is None:
+            raise ValueError("Could not find goal (red box) in environment")
+            
+        # Return x,z coordinates (ignoring y/height)
+        return np.array([goal_entity.pos[0], goal_entity.pos[2]])
+    
     def select_action(self, env: CustomEnv, observation, render=False):
         """
         Run MCTS and select the best action
@@ -282,10 +399,14 @@ class MCTSAgent:
         Returns:
             Selected action
         """
+        # Add warning about environment copying
+        if not hasattr(env, 'copy') or not callable(getattr(env, 'copy')):
+            logger.warning("Environment does not support proper copying. This may affect simulation accuracy.")
+        
         # Get the current state from the custom environment
         robot_pos = env.agent.pos
         robot_orientation = env.agent.dir * 90  # Convert to degrees
-        goal_pos = env.goal_pos
+        goal_pos = self._get_goal_position(env)
         
         # Create root node with proper 2D coordinates
         state = self.get_state_representation(observation, robot_pos, robot_orientation, goal_pos)
@@ -325,52 +446,103 @@ class MCTSAgent:
         
         # Select until we reach a leaf node or maximum depth
         while node.is_expanded() and depth < self.max_depth:
-            action, node = node.select_child(self.exploration_weight)
-            depth += 1
+            try:
+                action, node = node.select_child(self.exploration_weight)
+                depth += 1
+            except Exception as e:
+                logger.error(f"Error in select_child: {str(e)}")
+                # If there's an error in selection, break and expand current node
+                break
         
         # If the node is not expanded and within max depth, expand it
         if not node.is_expanded() and depth < self.max_depth:
-            # Use level/depth 1 process
-            detection_results, tagged_image = self.detect_objects(node.state["image"])
-            
-            # Use level/depth 2 process with VLM
-            vlm_results = self.get_vlm_actions(
-                tagged_image=tagged_image, 
-                robot_pos=node.state["robot_pos"], 
-                robot_orientation=node.state["robot_orientation"], 
-                goal_pos=node.state["goal_pos"], 
-                detection_results=detection_results
-            )
-            
-            # Extract actions and scores
-            action_scores = vlm_results.get("answer", {})
-            
-            # For each possible action, create a child node
-            for action_str, score in action_scores.items():
-                action = int(action_str)
+            try:
+                # Use level/depth 1 process
+                detection_results, tagged_image = self.detect_objects(node.state["image"])
                 
-                # Clone the environment to simulate the action
-                env_copy = env.copy()
-                
-                # Execute the action
-                next_obs, reward, done, info = env_copy.step(action)
-                
-                # Get the new state from the custom environment
-                next_robot_pos = np.array([env_copy.agent.pos[0], env_copy.agent.pos[2]])  # Extract x,z coordinates
-                next_robot_orientation = env_copy.agent.dir * 90
-                
-                next_state = self.get_state_representation(
-                    next_obs, next_robot_pos, next_robot_orientation, node.state["goal_pos"]
+                # Use level/depth 2 process with VLM
+                vlm_results = self.get_vlm_actions(
+                    tagged_image=tagged_image, 
+                    robot_pos=node.state["robot_pos"], 
+                    robot_orientation=node.state["robot_orientation"], 
+                    goal_pos=node.state["goal_pos"], 
+                    detection_results=detection_results
                 )
                 
-                # Create child node
-                child = MCTSNode(next_state, parent=node, action=action)
+                # Extract actions and scores
+                action_scores = vlm_results.get("answer", {})
                 
-                # Initialize child node with VLM score as initial value
-                child.value = float(score)
+                # If no actions from VLM, use random actions
+                if not action_scores:
+                    action_scores = {
+                        str(action): random.uniform(0.5, 1.0) 
+                        for action in self.action_space
+                    }
                 
-                # Add child to the current node
-                node.add_child(action, child)
+                # For each possible action, create a child node
+                for action_str, score in action_scores.items():
+                    action = int(action_str)
+                    
+                    # Clone the environment to simulate the action
+                    env_copy = env.copy()
+                    
+                    # Execute the action
+                    next_obs, reward, done, info = env_copy.step(action)
+                    
+                    # Get the new state from the custom environment
+                    next_robot_pos = np.array([env_copy.agent.pos[0], env_copy.agent.pos[2]])
+                    next_robot_orientation = env_copy.agent.dir * 90
+                    
+                    next_state = self.get_state_representation(
+                        next_obs, next_robot_pos, next_robot_orientation, node.state["goal_pos"]
+                    )
+                    
+                    # Create child node
+                    child = MCTSNode(next_state, parent=node, action=action)
+                    
+                    # Initialize child node with VLM score as initial value
+                    child.value = float(score)
+                    child.visit_count = 1  # Initialize with 1 visit to avoid division by zero
+                    
+                    # Add child to the current node
+                    node.add_child(action, child)
+                
+                # If no children were created, create random action children
+                if not node.children:
+                    for action in self.action_space:
+                        env_copy = env.copy()
+                        next_obs, reward, done, info = env_copy.step(action)
+                        
+                        next_robot_pos = np.array([env_copy.agent.pos[0], env_copy.agent.pos[2]])
+                        next_robot_orientation = env_copy.agent.dir * 90
+                        
+                        next_state = self.get_state_representation(
+                            next_obs, next_robot_pos, next_robot_orientation, node.state["goal_pos"]
+                        )
+                        
+                        child = MCTSNode(next_state, parent=node, action=action)
+                        child.value = random.uniform(0.5, 1.0)
+                        child.visit_count = 1
+                        node.add_child(action, child)
+                
+            except Exception as e:
+                logger.error(f"Error in expand: {str(e)}")
+                # If expansion fails, create random action children
+                for action in self.action_space:
+                    env_copy = env.copy()
+                    next_obs, reward, done, info = env_copy.step(action)
+                    
+                    next_robot_pos = np.array([env_copy.agent.pos[0], env_copy.agent.pos[2]])
+                    next_robot_orientation = env_copy.agent.dir * 90
+                    
+                    next_state = self.get_state_representation(
+                        next_obs, next_robot_pos, next_robot_orientation, node.state["goal_pos"]
+                    )
+                    
+                    child = MCTSNode(next_state, parent=node, action=action)
+                    child.value = random.uniform(0.5, 1.0)
+                    child.visit_count = 1
+                    node.add_child(action, child)
         
         return node, depth
     
@@ -393,8 +565,11 @@ class MCTSAgent:
         current_pos = node.state["robot_pos"]
         goal_pos = node.state["goal_pos"]
         
+        # Use default goal tolerance if not defined in environment
+        goal_tolerance = getattr(env_copy, 'goal_tolerance', 1.0)  # Default to 1.0 meter
+        
         # Check if already at goal
-        if self._distance_2d(current_pos, goal_pos) < env_copy.goal_tolerance:
+        if self._distance_2d(current_pos, goal_pos) < goal_tolerance:
             return env_copy.goal_reward  # Return goal reward directly
         
         # Run simulation
